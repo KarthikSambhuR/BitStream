@@ -71,33 +71,21 @@ func toggleRecording(hwnd syscall.Handle) {
 func buildFFmpegCmdLine(outputPath string) string {
 	src := activeSources[selectedIndex]
 
-	args := []string{"ffmpeg", "-y", "-f", "gdigrab", "-framerate", "30", "-rtbufsize", "10M", "-draw_mouse", "1"}
+	args := []string{
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-y",
+		"-f", "gdigrab",
+		"-framerate", "30",
+		"-rtbufsize", "10M",
+		"-draw_mouse", "1",
+	}
 
 	if src.Type == "screen" {
 		args = append(args, "-i", "desktop")
 	} else {
-		var rect RECT
-		procGetWindowRect.Call(uintptr(src.HWND), uintptr(unsafe.Pointer(&rect)))
-
-		scrWVal, _, _ := procGetSystemMetrics.Call(0)
-		scrHVal, _, _ := procGetSystemMetrics.Call(1)
-		screenW := int32(scrWVal)
-		screenH := int32(scrHVal)
-
-		x := rect.Left
-		y := rect.Top
-		w := rect.Right - rect.Left
-		h := rect.Bottom - rect.Top
-
-		if x < 0 { x = 0 }
-		if y < 0 { y = 0 }
-		if x+w > screenW { w = screenW - x }
-		if y+h > screenH { h = screenH - y }
-		if w%2 != 0 { w-- }
-		if h%2 != 0 { h-- }
-		if w <= 0 { w = 640 }
-		if h <= 0 { h = 480 }
-
+		x, y, w, h := selectedSourceBounds()
 		args = append(args,
 			"-offset_x", fmt.Sprintf("%d", x),
 			"-offset_y", fmt.Sprintf("%d", y),
@@ -106,18 +94,33 @@ func buildFFmpegCmdLine(outputPath string) string {
 		)
 	}
 
-	args = append(args, "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-threads", "1", "-pix_fmt", "yuv420p", outputPath)
+	args = append(args,
+		"-c:v", "libx264",
+		"-preset", "ultrafast",
+		"-tune", "zerolatency",
+		"-crf", "20",
+		"-threads", "1",
+		"-pix_fmt", "yuv420p",
+		"-movflags", "+faststart",
+		outputPath,
+	)
 
 	// Quote any argument that contains spaces
 	quoted := make([]string, len(args))
 	for i, a := range args {
-		if strings.ContainsAny(a, " \t") {
-			quoted[i] = `"` + a + `"`
-		} else {
-			quoted[i] = a
-		}
+		quoted[i] = quoteCmdArg(a)
 	}
 	return strings.Join(quoted, " ")
+}
+
+func quoteCmdArg(arg string) string {
+	if arg == "" {
+		return `""`
+	}
+	if !strings.ContainsAny(arg, " \t\"") {
+		return arg
+	}
+	return `"` + strings.ReplaceAll(arg, `"`, `\"`) + `"`
 }
 
 func startFFmpegRecording(hwnd syscall.Handle) {
@@ -175,7 +178,7 @@ func startFFmpegRecording(hwnd syscall.Handle) {
 	var siex STARTUPINFOEX
 	siex.StartupInfo.Cb = uint32(unsafe.Sizeof(siex))
 	siex.StartupInfo.Flags = syscall.STARTF_USESTDHANDLES | 0x00000100 // STARTF_USESHOWWINDOW
-	siex.StartupInfo.ShowWindow = 0                                     // SW_HIDE
+	siex.StartupInfo.ShowWindow = 0                                    // SW_HIDE
 	siex.StartupInfo.StdInput = stdinRead
 	siex.StartupInfo.StdOutput = syscall.Handle(0)
 	siex.StartupInfo.StdErr = syscall.Handle(0)
@@ -188,14 +191,14 @@ func startFFmpegRecording(hwnd syscall.Handle) {
 	creationFlags := uint32(EXTENDED_STARTUPINFO_PRESENT | 0x08000000) // +CREATE_NO_WINDOW
 
 	r, _, _ := procCreateProcessW.Call(
-		0,                                          // lpApplicationName (nil = use cmdline)
-		uintptr(unsafe.Pointer(cmdLineW)),           // lpCommandLine
-		0,                                          // lpProcessAttributes
-		0,                                          // lpThreadAttributes
-		1,                                          // bInheritHandles = TRUE (stdin pipe)
+		0,                                 // lpApplicationName (nil = use cmdline)
+		uintptr(unsafe.Pointer(cmdLineW)), // lpCommandLine
+		0,                                 // lpProcessAttributes
+		0,                                 // lpThreadAttributes
+		1,                                 // bInheritHandles = TRUE (stdin pipe)
 		uintptr(creationFlags),
-		0,                                          // lpEnvironment
-		0,                                          // lpCurrentDirectory
+		0, // lpEnvironment
+		0, // lpCurrentDirectory
 		uintptr(unsafe.Pointer(&siex)),
 		uintptr(unsafe.Pointer(&pi)),
 	)
@@ -230,10 +233,6 @@ func startFFmpegRecording(hwnd syscall.Handle) {
 				minutes := int(elapsed.Minutes()) % 60
 				seconds := int(elapsed.Seconds()) % 60
 				timerString = fmt.Sprintf("%02d:%02d", minutes, seconds)
-				var rect RECT
-				procGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&rect)))
-				timerRect := RECT{Left: 15, Top: rect.Bottom - 95, Right: 225, Bottom: rect.Bottom}
-				procInvalidateRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&timerRect)), 0)
 			case <-timerStopChan:
 				return
 			}

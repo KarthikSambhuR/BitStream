@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BitStream</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="titlebar">
+        <div class="brand" style="--wails-draggable: drag">
+          <div class="mark">B</div>
+          <div>
+            <div class="brand-name">BitStream</div>
+            <div class="brand-sub">lightweight capture studio</div>
+          </div>
+        </div>
+        <div class="window-actions">
+          <button class="icon-btn" id="minimise" title="Minimise">_</button>
+          <button class="icon-btn" id="maximise" title="Maximise">□</button>
+          <button class="icon-btn close" id="close" title="Close">×</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sources">
+          <section class="source-tabs">
+            <button class="tab active" data-tab="0">Screens</button>
+            <button class="tab" data-tab="1">Windows</button>
+          </section>
+
+          <section class="source-list" id="sourceList"></section>
+
+          <section class="source-actions">
+            <button class="ghost" id="refresh">Refresh</button>
+            <button class="ghost" id="folder">Folder</button>
+          </section>
+        </aside>
+
+        <section class="stage">
+          <div class="stage-head">
+            <div>
+              <div class="eyebrow">Live Preview</div>
+              <h1 id="previewTitle">Select a source</h1>
+            </div>
+            <div class="status-pill" id="enginePill">Checking</div>
+          </div>
+
+          <div class="preview">
+            <div class="preview-grid"></div>
+            <img id="previewImage" alt="" decoding="async" />
+            <div class="preview-card">
+              <div class="preview-icon" id="previewIcon"></div>
+              <div class="preview-name" id="previewName">No source selected</div>
+              <div class="preview-meta" id="previewMeta">Choose a screen or app window from the left rail</div>
+            </div>
+          </div>
+
+          <div class="transport">
+            <div class="record-clock">
+              <span id="recordDot"></span>
+              <strong id="timer">00:00</strong>
+              <small id="recordState">Idle</small>
+            </div>
+            <button class="record-btn" id="record">Start Recording</button>
+          </div>
+        </section>
+
+        <aside class="inspector">
+          <section class="panel">
+            <div class="panel-title">Performance Budget</div>
+            <div class="metric-grid">
+              <div class="metric">
+                <strong id="targetMem">25</strong>
+                <span>MB target</span>
+              </div>
+              <div class="metric">
+                <strong id="ceilingMem">35</strong>
+                <span>MB ceiling</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">Capture Engine</div>
+            <div class="engine-row">
+              <span>Backend</span>
+              <strong id="backend">Native</strong>
+            </div>
+            <p id="backendDetail"></p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title">Profile</div>
+            <button class="setting active" data-setting="quality">
+              <span>Quality</span>
+              <strong>High</strong>
+            </button>
+            <button class="setting" data-setting="fps">
+              <span>Frame rate</span>
+              <strong>30 FPS</strong>
+            </button>
+            <button class="setting active" data-setting="cursor">
+              <span>Cursor</span>
+              <strong>On</strong>
+            </button>
+            <button class="setting" data-setting="audio">
+              <span>Audio</span>
+              <strong>Later</strong>
+            </button>
+          </section>
+
+          <section class="panel grow">
+            <div class="panel-title">Pipeline</div>
+            <ol class="pipeline">
+              <li class="done">Source selected</li>
+              <li class="done">Low-overhead UI</li>
+              <li>Windows Graphics Capture module</li>
+              <li>Hardware encoder path</li>
+            </ol>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>
