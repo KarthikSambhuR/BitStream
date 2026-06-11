@@ -17,13 +17,13 @@ func activeCaptureBackendStatus() captureBackendStatus {
 	if windowsGraphicsCaptureAvailable() {
 		return captureBackendStatus{
 			Name:   string(captureBackendWGC),
-			Detail: "Windows Graphics Capture is available; native frame-pool recording is the next implementation layer.",
+			Detail: "Windows Graphics Capture is available. Browser capture prompts are disabled while the native WGC preview renderer is being wired in.",
 			Ready:  true,
 		}
 	}
 	return captureBackendStatus{
 		Name:   string(captureBackendDesktopCrop),
-		Detail: "Using visible desktop-region capture until the native WGC frame-pool recorder is complete.",
+		Detail: "Using the app-owned desktop capture preview so WebView2 does not show sharing prompts.",
 		Ready:  false,
 	}
 }

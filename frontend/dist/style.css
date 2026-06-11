@@ -311,18 +311,16 @@ h1 {
   background: #080d13;
 }
 
-#previewImage {
+#previewCanvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  object-position: center;
-  padding: 22px;
   opacity: 0;
 }
 
-#previewImage.live {
+#previewCanvas.live {
   opacity: 1;
 }
 

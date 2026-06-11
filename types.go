@@ -21,6 +21,7 @@ var (
 	procGetSystemMetrics     = user32.NewProc("GetSystemMetrics")
 	procGetCursorInfo        = user32.NewProc("GetCursorInfo")
 	procDrawIconEx           = user32.NewProc("DrawIconEx")
+	procPrintWindow          = user32.NewProc("PrintWindow")
 	procRtlGetVersion        = syscall.NewLazyDLL("ntdll.dll").NewProc("RtlGetVersion")
 
 	procDeleteObject           = gdi32.NewProc("DeleteObject")

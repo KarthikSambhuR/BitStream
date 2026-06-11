@@ -20,6 +20,12 @@ type SourceDTO struct {
 	Type  string `json:"type"`
 }
 
+type PreviewFrame struct {
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Pixels string `json:"pixels"`
+}
+
 type AppState struct {
 	Sources          []SourceDTO `json:"sources"`
 	CurrentTab       int         `json:"currentTab"`
@@ -75,8 +81,41 @@ func (a *App) SelectSource(index int) AppState {
 	return buildAppState()
 }
 
+func (a *App) StartNativePreview(index int, x int, y int, width int, height int) bool {
+	if index < 0 || index >= len(activeSources) {
+		nativeWGCPreviewStop()
+		return false
+	}
+	src := activeSources[index]
+	if src.Type != "window" || src.HWND == 0 {
+		nativeWGCPreviewStop()
+		return false
+	}
+	parent := findBitStreamWindow()
+	if parent == 0 {
+		return false
+	}
+	if selectedIndex != index {
+		selectedIndex = index
+		selectedHWND = src.HWND
+	}
+	return nativeWGCPreviewStart(parent, uintptr(src.HWND), x, y, width, height)
+}
+
+func (a *App) MoveNativePreview(x int, y int, width int, height int) {
+	nativeWGCPreviewMove(x, y, width, height)
+}
+
+func (a *App) StopNativePreview() {
+	nativeWGCPreviewStop()
+}
+
 func (a *App) GetPreviewFrame(index int, maxW int, maxH int) string {
 	return capturePreviewDataURL(index, maxW, maxH)
+}
+
+func (a *App) GetPreviewFrameRaw(index int, maxW int, maxH int) PreviewFrame {
+	return capturePreviewRawFrame(index, maxW, maxH)
 }
 
 func (a *App) StartRecording(index int) AppState {
@@ -165,10 +204,10 @@ func buildAppState() AppState {
 		FFmpegAvailable:  ffmpegAvailable,
 		CaptureBackend:   backend.Name,
 		BackendDetail:    backend.Detail,
-		RecorderMode:     "Low overhead",
+		RecorderMode:     "Native video preview",
 		MemoryTargetMB:   25,
 		MemoryCeilingMB:  35,
-		RecordingQuality: "x264 ultrafast, CRF 20, one thread",
+		RecordingQuality: "60 FPS, x264 ultrafast, CRF 20",
 		WGCCanCapture:    wgcCanCapture,
 	}
 }

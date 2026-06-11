@@ -77,7 +77,7 @@ func buildFFmpegCmdLine(outputPath string) string {
 		"-loglevel", "error",
 		"-y",
 		"-f", "gdigrab",
-		"-framerate", "30",
+		"-framerate", "60",
 		"-rtbufsize", "10M",
 		"-draw_mouse", "1",
 	}
@@ -85,13 +85,7 @@ func buildFFmpegCmdLine(outputPath string) string {
 	if src.Type == "screen" {
 		args = append(args, "-i", "desktop")
 	} else {
-		x, y, w, h := selectedSourceBounds()
-		args = append(args,
-			"-offset_x", fmt.Sprintf("%d", x),
-			"-offset_y", fmt.Sprintf("%d", y),
-			"-video_size", fmt.Sprintf("%dx%d", w, h),
-			"-i", "desktop",
-		)
+		args = append(args, "-i", "title="+src.Name)
 	}
 
 	args = append(args,

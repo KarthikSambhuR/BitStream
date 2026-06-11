@@ -7,6 +7,9 @@ const state = {
   tick: null,
   previewTick: null,
   previewBusy: false,
+  previewFrameRequest: null,
+  previewCtx: null,
+  nativePreview: false,
   windowSaveTick: null,
 };
 
@@ -19,7 +22,7 @@ const els = {
   previewTitle: document.querySelector("#previewTitle"),
   previewName: document.querySelector("#previewName"),
   previewMeta: document.querySelector("#previewMeta"),
-  previewImage: document.querySelector("#previewImage"),
+  previewCanvas: document.querySelector("#previewCanvas"),
   previewCard: document.querySelector(".preview-card"),
   enginePill: document.querySelector("#enginePill"),
   timer: document.querySelector("#timer"),
@@ -72,7 +75,7 @@ function render(next) {
     ? `${sourceLabel(selected.type)} armed for capture`
     : "Choose a screen or app window from the left rail";
   els.previewCard.classList.toggle("hidden", Boolean(selected));
-  els.previewImage.classList.toggle("live", Boolean(selected));
+  els.previewCanvas.classList.toggle("live", Boolean(selected));
 
   els.enginePill.textContent = next.ffmpegAvailable
     ? next.isRecording
@@ -91,7 +94,7 @@ function render(next) {
   els.ceilingMem.textContent = next.memoryCeilingMb;
   els.backend.textContent = next.captureBackend;
   els.backendDetail.textContent = next.wgcCanCapture
-    ? "Selected source can be captured through Windows Graphics Capture. GPU frame-pool preview/encoding is the next active path."
+    ? "Selected source is WGC-compatible. Browser capture prompts are disabled; native WGC preview is the next renderer path."
     : next.backendDetail;
 
   manageTimer(next.isRecording);
@@ -111,31 +114,118 @@ function manageTimer(isRecording) {
 }
 
 function managePreview(hasSource, index) {
-  if (hasSource && state.previewTick === null) {
-    updatePreview(index);
-    state.previewTick = window.setInterval(() => updatePreview(state.selectedIndex), 125);
+  if (hasSource) {
+    startNativePreview(index);
   }
-  if (!hasSource && state.previewTick !== null) {
-    window.clearInterval(state.previewTick);
-    state.previewTick = null;
-    els.previewImage.removeAttribute("src");
+  if (hasSource && !state.nativePreview && state.previewFrameRequest === null) {
+    schedulePreviewFrame(index);
+  }
+  if (!hasSource && state.previewFrameRequest !== null) {
+    window.cancelAnimationFrame(state.previewFrameRequest);
+    state.previewFrameRequest = null;
+    clearPreviewCanvas();
+  }
+  if (!hasSource && state.nativePreview) {
+    api().StopNativePreview();
+    state.nativePreview = false;
   }
 }
 
+async function startNativePreview(index) {
+  if (index < 0) return;
+  const selectedButton = [...els.sourceList.querySelectorAll(".source")][index];
+  const isWindow = selectedButton?.querySelector(".thumb.window");
+  if (!isWindow) {
+    if (state.nativePreview) {
+      await api().StopNativePreview();
+      state.nativePreview = false;
+    }
+    return;
+  }
+
+  const rect = els.previewCanvas.getBoundingClientRect();
+  const x = Math.round(rect.left);
+  const y = Math.round(rect.top);
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  const started = await api().StartNativePreview(index, x, y, width, height);
+  state.nativePreview = Boolean(started);
+  if (state.nativePreview) {
+    if (state.previewFrameRequest !== null) {
+      window.cancelAnimationFrame(state.previewFrameRequest);
+      state.previewFrameRequest = null;
+    }
+    clearPreviewCanvas();
+  }
+}
+
+function moveNativePreview() {
+  if (!state.nativePreview) return;
+  const rect = els.previewCanvas.getBoundingClientRect();
+  api().MoveNativePreview(
+    Math.round(rect.left),
+    Math.round(rect.top),
+    Math.max(1, Math.round(rect.width)),
+    Math.max(1, Math.round(rect.height)),
+  );
+}
+
+function schedulePreviewFrame(index) {
+  state.previewFrameRequest = window.requestAnimationFrame(() => updatePreview(index));
+}
+
 async function updatePreview(index) {
+  state.previewFrameRequest = null;
   if (state.previewBusy || index < 0) return;
   state.previewBusy = true;
   try {
-    const rect = els.previewImage.getBoundingClientRect();
-    const maxW = Math.max(360, Math.min(960, Math.floor(rect.width - 44)));
-    const maxH = Math.max(202, Math.min(540, Math.floor(rect.height - 44)));
-    const frame = await api().GetPreviewFrame(index, maxW, maxH);
-    if (frame && index === state.selectedIndex) {
-      els.previewImage.src = frame;
+    const rect = els.previewCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const maxW = Math.max(1, Math.floor(rect.width * dpr));
+    const maxH = Math.max(1, Math.floor(rect.height * dpr));
+    const frame = await api().GetPreviewFrameRaw(index, maxW, maxH);
+    if (frame?.pixels && index === state.selectedIndex) {
+      drawPreviewFrame(frame, rect, dpr);
     }
   } finally {
     state.previewBusy = false;
+    if (state.selectedIndex >= 0) {
+      schedulePreviewFrame(state.selectedIndex);
+    }
   }
+}
+
+function drawPreviewFrame(frame, rect, dpr) {
+  const canvas = els.previewCanvas;
+  const canvasWidth = Math.max(1, Math.floor(rect.width * dpr));
+  const canvasHeight = Math.max(1, Math.floor(rect.height * dpr));
+  if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    state.previewCtx = null;
+  }
+
+  const binary = window.atob(frame.pixels);
+  const bytes = new Uint8ClampedArray(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  const ctx = state.previewCtx || canvas.getContext("2d", { alpha: false });
+  state.previewCtx = ctx;
+  const x = Math.max(0, Math.floor((canvas.width - frame.width) / 2));
+  const y = Math.max(0, Math.floor((canvas.height - frame.height) / 2));
+  ctx.fillStyle = "#05080c";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.putImageData(new ImageData(bytes, frame.width, frame.height), x, y);
+  canvas.classList.add("live");
+}
+
+function clearPreviewCanvas() {
+  const canvas = els.previewCanvas;
+  const ctx = state.previewCtx || canvas.getContext("2d", { alpha: false });
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.classList.remove("live");
 }
 
 function escapeHtml(value) {
@@ -176,6 +266,7 @@ async function boot() {
   els.close.addEventListener("click", () => api().Close());
 
   render(await api().GetState());
+  window.addEventListener("resize", moveNativePreview);
   state.windowSaveTick = window.setInterval(() => api().SaveWindowState(), 5000);
   window.addEventListener("beforeunload", () => api().SaveWindowState());
 }

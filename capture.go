@@ -11,12 +11,14 @@ import (
 )
 
 const (
-	srccopy       = 0x00CC0020
-	capTUREBLT    = 0x40000000
-	biRGB         = 0
-	dibRGBColors  = 0
-	cursorShowing = 0x00000001
-	diNormal      = 0x0003
+	srccopy        = 0x00CC0020
+	capTUREBLT     = 0x40000000
+	biRGB          = 0
+	dibRGBColors   = 0
+	cursorShowing  = 0x00000001
+	diNormal       = 0x0003
+	pwRenderFull   = 0x00000002
+	stretchQuality = 4
 )
 
 var previewCapture = previewCaptureState{}
@@ -30,6 +32,7 @@ type previewCaptureState struct {
 	width  int32
 	height int32
 	pixels []byte
+	rgba   []byte
 }
 
 type bitmapInfoHeader struct {
@@ -114,7 +117,7 @@ func capturePreviewDataURL(index int, maxW, maxH int) string {
 	}
 
 	src := activeSources[index]
-	x, y, srcW, srcH := sourceBounds(src)
+	x, y, srcW, srcH := previewSourceBounds(src)
 	if srcW <= 0 || srcH <= 0 {
 		return ""
 	}
@@ -151,6 +154,65 @@ func capturePreviewDataURL(index int, maxW, maxH int) string {
 	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(out.Bytes())
 }
 
+func capturePreviewRawFrame(index int, maxW, maxH int) PreviewFrame {
+	previewCapture.mu.Lock()
+	defer previewCapture.mu.Unlock()
+
+	if index < 0 || index >= len(activeSources) {
+		return PreviewFrame{}
+	}
+	if maxW <= 0 {
+		maxW = 960
+	}
+	if maxH <= 0 {
+		maxH = 540
+	}
+
+	src := activeSources[index]
+	x, y, srcW, srcH := previewSourceBounds(src)
+	if srcW <= 0 || srcH <= 0 {
+		return PreviewFrame{}
+	}
+
+	dstW, dstH := fitInside(srcW, srcH, int32(maxW), int32(maxH))
+	if dstW <= 0 || dstH <= 0 {
+		return PreviewFrame{}
+	}
+
+	if !previewCapture.ensure(dstW, dstH) {
+		return PreviewFrame{}
+	}
+
+	if src.Type == "window" {
+		if !previewCapture.renderWindow(src.HWND, srcW, srcH, dstW, dstH) {
+			return PreviewFrame{}
+		}
+		drawPreviewCursor(previewCapture.memDC, x, y, srcW, srcH, dstW, dstH)
+	} else {
+		procSetStretchBltMode.Call(previewCapture.memDC, stretchQuality)
+		ret, _, _ := procStretchBlt.Call(
+			previewCapture.memDC, 0, 0, uintptr(dstW), uintptr(dstH),
+			previewCapture.srcDC, uintptr(x), uintptr(y), uintptr(srcW), uintptr(srcH),
+			uintptr(srccopy|capTUREBLT),
+		)
+		if ret == 0 {
+			return PreviewFrame{}
+		}
+		drawPreviewCursor(previewCapture.memDC, x, y, srcW, srcH, dstW, dstH)
+	}
+
+	pixels := previewCapture.bitmapToRGBABytes()
+	if len(pixels) == 0 {
+		return PreviewFrame{}
+	}
+
+	return PreviewFrame{
+		Width:  int(dstW),
+		Height: int(dstH),
+		Pixels: base64.StdEncoding.EncodeToString(pixels),
+	}
+}
+
 func (p *previewCaptureState) ensure(width, height int32) bool {
 	if width <= 0 || height <= 0 {
 		return false
@@ -179,7 +241,57 @@ func (p *previewCaptureState) ensure(width, height int32) bool {
 	p.width = width
 	p.height = height
 	p.pixels = make([]byte, int(width*height*4))
+	p.rgba = make([]byte, int(width*height*4))
 	return true
+}
+
+func (p *previewCaptureState) renderWindow(hwnd syscall.Handle, srcW, srcH, dstW, dstH int32) bool {
+	if hwnd == 0 || srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0 || p.srcDC == 0 || p.memDC == 0 {
+		return false
+	}
+
+	fullDC, _, _ := procCreateCompatibleDC.Call(p.srcDC)
+	if fullDC == 0 {
+		return false
+	}
+	defer procDeleteDC.Call(fullDC)
+
+	fullBitmap, _, _ := procCreateCompatibleBitmap.Call(p.srcDC, uintptr(srcW), uintptr(srcH))
+	if fullBitmap == 0 {
+		return false
+	}
+	defer procDeleteObject.Call(fullBitmap)
+
+	oldObj, _, _ := procSelectObject.Call(fullDC, fullBitmap)
+	defer procSelectObject.Call(fullDC, oldObj)
+
+	printed, _, _ := procPrintWindow.Call(uintptr(hwnd), fullDC, pwRenderFull)
+	if printed == 0 {
+		return false
+	}
+
+	procSetStretchBltMode.Call(p.memDC, stretchQuality)
+	scaled, _, _ := procStretchBlt.Call(
+		p.memDC, 0, 0, uintptr(dstW), uintptr(dstH),
+		fullDC, 0, 0, uintptr(srcW), uintptr(srcH),
+		uintptr(srccopy),
+	)
+	return scaled != 0
+}
+
+func previewSourceBounds(src SourceItem) (int32, int32, int32, int32) {
+	if src.Type == "window" && src.HWND != 0 {
+		var rect RECT
+		ret, _, _ := procGetWindowRect.Call(uintptr(src.HWND), uintptr(unsafe.Pointer(&rect)))
+		if ret != 0 {
+			w := rect.Right - rect.Left
+			h := rect.Bottom - rect.Top
+			if w > 0 && h > 0 {
+				return rect.Left, rect.Top, w, h
+			}
+		}
+	}
+	return sourceBounds(src)
 }
 
 func (p *previewCaptureState) release() {
@@ -206,9 +318,22 @@ func (p *previewCaptureState) releaseBitmap() {
 	p.width = 0
 	p.height = 0
 	p.pixels = nil
+	p.rgba = nil
 }
 
 func (p *previewCaptureState) bitmapToRGBA() *image.RGBA {
+	rgba := p.bitmapToRGBABytes()
+	if len(rgba) == 0 {
+		return nil
+	}
+	width := int(p.width)
+	height := int(p.height)
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	copy(img.Pix, rgba)
+	return img
+}
+
+func (p *previewCaptureState) bitmapToRGBABytes() []byte {
 	if p.width <= 0 || p.height <= 0 || p.memDC == 0 || p.bitmap == 0 {
 		return nil
 	}
@@ -239,17 +364,19 @@ func (p *previewCaptureState) bitmapToRGBA() *image.RGBA {
 
 	width := int(p.width)
 	height := int(p.height)
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	if len(p.rgba) != width*height*4 {
+		p.rgba = make([]byte, width*height*4)
+	}
 	for i := 0; i < width*height; i++ {
 		b := p.pixels[i*4+0]
 		g := p.pixels[i*4+1]
 		r := p.pixels[i*4+2]
-		img.Pix[i*4+0] = r
-		img.Pix[i*4+1] = g
-		img.Pix[i*4+2] = b
-		img.Pix[i*4+3] = 255
+		p.rgba[i*4+0] = r
+		p.rgba[i*4+1] = g
+		p.rgba[i*4+2] = b
+		p.rgba[i*4+3] = 255
 	}
-	return img
+	return p.rgba
 }
 
 func drawPreviewCursor(hdc uintptr, srcX, srcY, srcW, srcH, dstW, dstH int32) {

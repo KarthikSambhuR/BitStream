@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"syscall"
+	"unsafe"
 )
 
 type windowConfig struct {
@@ -57,4 +59,14 @@ func windowConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(base, "BitStream", "window.json"), nil
+}
+
+func findBitStreamWindow() uintptr {
+	className, _ := syscall.UTF16PtrFromString("BitStreamWailsWindow")
+	title, _ := syscall.UTF16PtrFromString("BitStream")
+	hwnd, _, _ := procFindWindowW.Call(
+		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(title)),
+	)
+	return hwnd
 }
