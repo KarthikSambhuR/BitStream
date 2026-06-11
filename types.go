@@ -23,6 +23,9 @@ var (
 	procDrawIconEx           = user32.NewProc("DrawIconEx")
 	procPrintWindow          = user32.NewProc("PrintWindow")
 	procRtlGetVersion        = syscall.NewLazyDLL("ntdll.dll").NewProc("RtlGetVersion")
+	procGetWindowLongW       = user32.NewProc("GetWindowLongW")
+	procGetClassNameW        = user32.NewProc("GetClassNameW")
+	procDwmGetWindowAttribute = syscall.NewLazyDLL("dwmapi.dll").NewProc("DwmGetWindowAttribute")
 
 	procDeleteObject           = gdi32.NewProc("DeleteObject")
 	procSelectObject           = gdi32.NewProc("SelectObject")

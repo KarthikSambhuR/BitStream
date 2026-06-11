@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"image"
 	"image/jpeg"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -76,19 +77,83 @@ func refreshSourceListLight(tab int) {
 	}
 
 	cb := syscall.NewCallback(func(hwnd syscall.Handle, lparam uintptr) uintptr {
+		// 1. Visible check
 		visible, _, _ := procIsWindowVisible.Call(uintptr(hwnd))
 		if visible == 0 {
 			return 1
 		}
+
+		// 2. Filter out child windows (WS_CHILD = 0x40000000)
+		gwlStyle := int32(-16)
+		style, _, _ := procGetWindowLongW.Call(uintptr(hwnd), uintptr(gwlStyle))
+		if (style & 0x40000000) != 0 {
+			return 1
+		}
+
+		// 3. Filter out tool windows unless they explicitly request app window behavior
+		// WS_EX_TOOLWINDOW = 0x80, WS_EX_APPWINDOW = 0x40000
+		gwlExStyle := int32(-20)
+		exStyle, _, _ := procGetWindowLongW.Call(uintptr(hwnd), uintptr(gwlExStyle))
+		if (exStyle & 0x00000080) != 0 && (exStyle & 0x00040000) == 0 {
+			return 1
+		}
+
+		// 4. Filter out cloaked windows (DWMWA_CLOAKED = 14)
+		var cloaked uint32
+		ret, _, _ := procDwmGetWindowAttribute.Call(
+			uintptr(hwnd),
+			14,
+			uintptr(unsafe.Pointer(&cloaked)),
+			unsafe.Sizeof(cloaked),
+		)
+		if ret == 0 && cloaked != 0 {
+			return 1
+		}
+
+		// 5. Get rect and check size
+		var rect RECT
+		procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&rect)))
+		w := rect.Right - rect.Left
+		h := rect.Bottom - rect.Top
+		if w <= 0 || h <= 0 {
+			return 1
+		}
+
+		// 6. Get window title length
 		length, _, _ := procGetWindowTextLengthW.Call(uintptr(hwnd))
 		if length == 0 {
 			return 1
 		}
 
+		// 7. Get window title
 		buf := make([]uint16, length+1)
 		procGetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), length+1)
 		title := syscall.UTF16ToString(buf)
 		if title == "" || title == "Program Manager" || title == "BitStream" || title == "BitStream - Screen Recorder" || title == "Settings" {
+			return 1
+		}
+
+		// 8. Filter by ClassName and Title mapping
+		var classBuf [256]uint16
+		procGetClassNameW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&classBuf[0])), 256)
+		className := syscall.UTF16ToString(classBuf[:])
+
+		titleLower := strings.ToLower(title)
+		classLower := strings.ToLower(className)
+
+		// Filter out task manager, nvidia overlay, windows input overlays, steam hidden layers, etc.
+		if strings.Contains(classLower, "taskmanagerwindow") || titleLower == "task manager" || titleLower == "taskmgr" {
+			return 1
+		}
+		if strings.Contains(classLower, "nvidia") || strings.Contains(titleLower, "nvidia share") || strings.Contains(titleLower, "geforce overlay") || strings.Contains(titleLower, "nvidia geforce overlay") {
+			return 1
+		}
+		if strings.Contains(classLower, "inputindicatorwindow") || strings.Contains(titleLower, "windows input experience") || strings.Contains(titleLower, "microsoft text input application") || strings.Contains(classLower, "corewindow") {
+			if titleLower == "windows input experience" || titleLower == "microsoft text input application" || titleLower == "action center" || titleLower == "cortana" || titleLower == "start" {
+				return 1
+			}
+		}
+		if classLower == "shell_traywnd" || classLower == "shell_secondarytraywnd" || classLower == "progman" || classLower == "workerw" || classLower == "notifyiconoverflowwindow" {
 			return 1
 		}
 
