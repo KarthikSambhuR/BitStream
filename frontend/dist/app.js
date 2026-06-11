@@ -23,7 +23,7 @@ const els = {
   previewName: document.querySelector("#previewName"),
   previewMeta: document.querySelector("#previewMeta"),
   previewCanvas: document.querySelector("#previewCanvas"),
-  previewCard: document.querySelector(".preview-card"),
+  previewCard: document.querySelector("#previewPlaceholder"),
   enginePill: document.querySelector("#enginePill"),
   timer: document.querySelector("#timer"),
   recordDot: document.querySelector("#recordDot"),
@@ -38,7 +38,7 @@ const els = {
 };
 
 function sourceLabel(type) {
-  return type === "screen" ? "Display source" : "Window source";
+  return type === "screen" ? "Display Feed" : "Window Capture";
 }
 
 function render(next) {
@@ -54,9 +54,12 @@ function render(next) {
     ...next.sources.map((source) => {
       const button = document.createElement("button");
       button.className = `source ${source.index === next.selectedIndex ? "active" : ""}`;
+      const iconName = source.type === "screen" ? "monitor" : "layers";
       button.innerHTML = `
-        <div class="thumb ${source.type}"></div>
-        <div>
+        <div class="thumb ${source.type}">
+          <i data-lucide="${iconName}"></i>
+        </div>
+        <div class="source-info">
           <strong title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</strong>
           <span>${sourceLabel(source.type)}</span>
         </div>
@@ -87,8 +90,21 @@ function render(next) {
   els.timer.textContent = next.timer;
   els.recordState.textContent = next.isRecording ? "Capturing" : "Idle";
   els.recordDot.classList.toggle("live", next.isRecording);
-  els.record.textContent = next.isRecording ? "Stop Recording" : "Start Recording";
-  els.record.classList.toggle("stop", next.isRecording);
+
+  // Update Record Button text & icon
+  const recordIcon = document.getElementById("recordBtnIcon");
+  const recordText = document.getElementById("recordBtnText");
+  if (recordIcon && recordText) {
+    if (next.isRecording) {
+      recordIcon.setAttribute("data-lucide", "square");
+      recordText.textContent = "Stop Recording";
+      els.record.className = "record-btn stop";
+    } else {
+      recordIcon.setAttribute("data-lucide", "play");
+      recordText.textContent = "Start Recording";
+      els.record.className = "record-btn";
+    }
+  }
 
   els.targetMem.textContent = next.memoryTargetMb;
   els.ceilingMem.textContent = next.memoryCeilingMb;
@@ -99,6 +115,11 @@ function render(next) {
 
   manageTimer(next.isRecording);
   managePreview(Boolean(selected), next.selectedIndex);
+
+  // Parse new icon elements using Lucide
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
 }
 
 function manageTimer(isRecording) {
@@ -134,7 +155,7 @@ function managePreview(hasSource, index) {
 async function startNativePreview(index) {
   if (index < 0) return;
   const selectedButton = [...els.sourceList.querySelectorAll(".source")][index];
-  const isWindow = selectedButton?.querySelector(".thumb.window");
+  const isWindow = selectedButton?.querySelector(".thumb.window") || selectedButton?.querySelector(".thumb.layers") || selectedButton?.querySelector("[data-lucide='layers']");
   if (!isWindow) {
     if (state.nativePreview) {
       await api().StopNativePreview();
@@ -215,7 +236,7 @@ function drawPreviewFrame(frame, rect, dpr) {
   state.previewCtx = ctx;
   const x = Math.max(0, Math.floor((canvas.width - frame.width) / 2));
   const y = Math.max(0, Math.floor((canvas.height - frame.height) / 2));
-  ctx.fillStyle = "#05080c";
+  ctx.fillStyle = "#090d12"; // Match minimal background
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.putImageData(new ImageData(bytes, frame.width, frame.height), x, y);
   canvas.classList.add("live");
@@ -237,10 +258,15 @@ function escapeHtml(value) {
 }
 
 async function boot() {
+  // Wait for the backend API connection
   while (!api()) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
+  // Start checking and downloading offline assets first
+  await loadOfflineAssets();
+
+  // Attach event listeners
   els.tabs.forEach((tab) => {
     tab.addEventListener("click", async () => {
       render(await api().RefreshSources(Number(tab.dataset.tab)));
@@ -265,10 +291,59 @@ async function boot() {
   els.maximise.addEventListener("click", () => api().ToggleMaximise());
   els.close.addEventListener("click", () => api().Close());
 
+  // Render initial state
   render(await api().GetState());
   window.addEventListener("resize", moveNativePreview);
   state.windowSaveTick = window.setInterval(() => api().SaveWindowState(), 5000);
   window.addEventListener("beforeunload", () => api().SaveWindowState());
+}
+
+async function loadOfflineAssets() {
+  const loaderStatus = document.getElementById("loader-status");
+  
+  // 1. Wait for caching download process to finish
+  let status = await api().GetAssetDownloadStatus();
+  while (status.isDownloading) {
+    loaderStatus.textContent = "Downloading system font & icon library...";
+    await new Promise(r => setTimeout(r, 800));
+    status = await api().GetAssetDownloadStatus();
+  }
+
+  if (status.error) {
+    console.error("Asset download error recorded:", status.error);
+  }
+
+  // 2. Load Urbanist font from local cache folder
+  try {
+    loaderStatus.textContent = "Caching Urbanist font...";
+    const fontBase64 = await api().LoadCachedAsset("Urbanist-Regular.ttf");
+    if (fontBase64) {
+      const fontFace = new FontFace('Urbanist', `url(data:font/ttf;base64,${fontBase64})`);
+      await fontFace.load();
+      document.fonts.add(fontFace);
+      document.body.style.fontFamily = "'Urbanist', sans-serif";
+    }
+  } catch (err) {
+    console.error("Failed to load Urbanist font from cache:", err);
+  }
+
+  // 3. Load Lucide JS from local cache folder
+  try {
+    loaderStatus.textContent = "Caching icon library...";
+    const lucideBase64 = await api().LoadCachedAsset("lucide.min.js");
+    if (lucideBase64) {
+      const decodedJs = atob(lucideBase64);
+      const script = document.createElement("script");
+      script.text = decodedJs;
+      document.head.appendChild(script);
+    }
+  } catch (err) {
+    console.error("Failed to load Lucide icon script from cache:", err);
+  }
+
+  // Remove loader and display main screen
+  document.getElementById("app-loader").classList.add("hidden");
+  document.getElementById("app-root").classList.remove("hidden");
 }
 
 boot();

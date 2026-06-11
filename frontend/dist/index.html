@@ -7,119 +7,171 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <div class="app">
-      <header class="titlebar">
-        <div class="brand" style="--wails-draggable: drag">
-          <div class="mark">B</div>
-          <div>
-            <div class="brand-name">BitStream</div>
-            <div class="brand-sub">lightweight capture studio</div>
+    <!-- App loader for initial cache download -->
+    <div id="app-loader" class="app-loader">
+      <div class="loader-content">
+        <div class="loader-ring"><div></div><div></div><div></div><div></div></div>
+        <div class="loader-title">BitStream</div>
+        <div id="loader-status" class="loader-status">Initializing workspace...</div>
+      </div>
+    </div>
+
+    <div class="app hidden" id="app-root">
+      <!-- Minimalist Window Titlebar -->
+      <header class="titlebar" style="--wails-draggable: drag">
+        <div class="brand">
+          <div class="mark">
+            <i data-lucide="film"></i>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">BitStream</span>
+            <span class="brand-sub">Lightweight Studio</span>
           </div>
         </div>
-        <div class="window-actions">
-          <button class="icon-btn" id="minimise" title="Minimise">_</button>
-          <button class="icon-btn" id="maximise" title="Maximise">□</button>
-          <button class="icon-btn close" id="close" title="Close">×</button>
+        <div class="window-actions" style="--wails-draggable: no-drag">
+          <button class="icon-btn" id="minimise" title="Minimize">
+            <i data-lucide="minus"></i>
+          </button>
+          <button class="icon-btn" id="maximise" title="Maximize">
+            <i data-lucide="square"></i>
+          </button>
+          <button class="icon-btn close" id="close" title="Close">
+            <i data-lucide="x"></i>
+          </button>
         </div>
       </header>
 
+      <!-- Main Workspace -->
       <main class="workspace">
+        <!-- Sidebar Sources -->
         <aside class="sources">
-          <section class="source-tabs">
-            <button class="tab active" data-tab="0">Screens</button>
-            <button class="tab" data-tab="1">Windows</button>
-          </section>
+          <div class="section-header">
+            <h2>Capture Sources</h2>
+          </div>
+          <nav class="source-tabs">
+            <button class="tab active" data-tab="0">
+              <i data-lucide="monitor"></i>
+              <span>Screens</span>
+            </button>
+            <button class="tab" data-tab="1">
+              <i data-lucide="layers"></i>
+              <span>Windows</span>
+            </button>
+          </nav>
 
-          <section class="source-list" id="sourceList"></section>
+          <div class="source-list" id="sourceList">
+            <!-- Populated dynamically -->
+          </div>
 
-          <section class="source-actions">
-            <button class="ghost" id="refresh">Refresh</button>
-            <button class="ghost" id="folder">Folder</button>
-          </section>
+          <div class="source-actions">
+            <button class="action-btn" id="refresh" title="Refresh Sources">
+              <i data-lucide="rotate-cw"></i>
+              <span>Refresh</span>
+            </button>
+            <button class="action-btn" id="folder" title="Open Recordings Folder">
+              <i data-lucide="folder"></i>
+              <span>Recordings</span>
+            </button>
+          </div>
         </aside>
 
+        <!-- Preview Stage -->
         <section class="stage">
           <div class="stage-head">
-            <div>
-              <div class="eyebrow">Live Preview</div>
+            <div class="stage-info">
+              <span class="eyebrow">Monitor Feed</span>
               <h1 id="previewTitle">Select a source</h1>
             </div>
-            <div class="status-pill" id="enginePill">Checking</div>
+            <div class="status-pill" id="enginePill">Ready</div>
           </div>
 
           <div class="preview">
             <div class="preview-grid"></div>
             <canvas id="previewCanvas"></canvas>
-            <div class="preview-card">
-              <div class="preview-icon" id="previewIcon"></div>
-              <div class="preview-name" id="previewName">No source selected</div>
-              <div class="preview-meta" id="previewMeta">Choose a screen or app window from the left rail</div>
+            <div class="preview-card" id="previewPlaceholder">
+              <div class="preview-icon">
+                <i data-lucide="video"></i>
+              </div>
+              <div class="preview-name" id="previewName">No active source</div>
+              <div class="preview-meta" id="previewMeta">Choose a screen or window to start monitoring</div>
             </div>
           </div>
 
           <div class="transport">
             <div class="record-clock">
               <span id="recordDot"></span>
-              <strong id="timer">00:00</strong>
-              <small id="recordState">Idle</small>
+              <span id="timer" class="timer-digits">00:00</span>
+              <span id="recordState" class="record-state">Idle</span>
             </div>
-            <button class="record-btn" id="record">Start Recording</button>
+            <button class="record-btn" id="record">
+              <i data-lucide="play" id="recordBtnIcon"></i>
+              <span id="recordBtnText">Start Recording</span>
+            </button>
           </div>
         </section>
 
+        <!-- Right Inspector Panels -->
         <aside class="inspector">
-          <section class="panel">
-            <div class="panel-title">Performance Budget</div>
+          <div class="panel">
+            <div class="panel-header">
+              <i data-lucide="cpu"></i>
+              <h3>Performance</h3>
+            </div>
             <div class="metric-grid">
               <div class="metric">
-                <strong id="targetMem">25</strong>
-                <span>MB target</span>
+                <div class="metric-val" id="targetMem">25</div>
+                <div class="metric-lbl">Target (MB)</div>
               </div>
               <div class="metric">
-                <strong id="ceilingMem">35</strong>
-                <span>MB ceiling</span>
+                <div class="metric-val" id="ceilingMem">35</div>
+                <div class="metric-lbl">Ceiling (MB)</div>
               </div>
             </div>
-          </section>
+          </div>
 
-          <section class="panel">
-            <div class="panel-title">Capture Engine</div>
-            <div class="engine-row">
-              <span>Backend</span>
-              <strong id="backend">Native</strong>
+          <div class="panel">
+            <div class="panel-header">
+              <i data-lucide="settings"></i>
+              <h3>Engine Status</h3>
             </div>
-            <p id="backendDetail"></p>
-          </section>
+            <div class="engine-info">
+              <div class="info-row">
+                <span class="info-lbl">Backend</span>
+                <span class="info-val highlight" id="backend">Native</span>
+              </div>
+              <p class="info-desc" id="backendDetail">Determining backend capabilities...</p>
+            </div>
+          </div>
 
-          <section class="panel">
-            <div class="panel-title">Profile</div>
-            <button class="setting active" data-setting="quality">
-              <span>Quality</span>
-              <strong>High</strong>
-            </button>
-            <button class="setting" data-setting="fps">
-              <span>Frame rate</span>
-              <strong>30 FPS</strong>
-            </button>
-            <button class="setting active" data-setting="cursor">
-              <span>Cursor</span>
-              <strong>On</strong>
-            </button>
-            <button class="setting" data-setting="audio">
-              <span>Audio</span>
-              <strong>Later</strong>
-            </button>
-          </section>
-
-          <section class="panel grow">
-            <div class="panel-title">Pipeline</div>
-            <ol class="pipeline">
-              <li class="done">Source selected</li>
-              <li class="done">Native video preview</li>
-              <li class="done">Direct window recording target</li>
-              <li>Native WGC encoder path</li>
-            </ol>
-          </section>
+          <div class="panel grow-panel">
+            <div class="panel-header">
+              <i data-lucide="sliders"></i>
+              <h3>Configuration</h3>
+            </div>
+            <div class="setting-list">
+              <div class="setting-item active">
+                <div class="setting-icon"><i data-lucide="check-circle-2"></i></div>
+                <div class="setting-text">
+                  <span class="setting-name">Quality Profile</span>
+                  <span class="setting-val">High Quality</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-icon"><i data-lucide="clock"></i></div>
+                <div class="setting-text">
+                  <span class="setting-name">Target FPS</span>
+                  <span class="setting-val">30 FPS</span>
+                </div>
+              </div>
+              <div class="setting-item active">
+                <div class="setting-icon"><i data-lucide="mouse-pointer"></i></div>
+                <div class="setting-text">
+                  <span class="setting-name">Capture Cursor</span>
+                  <span class="setting-val">Visible</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </aside>
       </main>
     </div>

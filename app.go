@@ -4,10 +4,23 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"sync"
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+var (
+	downloadMutex sync.RWMutex
+	isDownloading bool
+	downloadError string
 )
 
 type App struct {
@@ -51,6 +64,85 @@ func (a *App) startup(ctx context.Context) {
 	_, lookupErr := exec.LookPath("ffmpeg")
 	ffmpegAvailable = lookupErr == nil
 	refreshSourceListLight(0)
+	go a.ensureAssets()
+}
+
+func (a *App) ensureAssets() {
+	downloadMutex.Lock()
+	isDownloading = true
+	downloadError = ""
+	downloadMutex.Unlock()
+
+	defer func() {
+		downloadMutex.Lock()
+		isDownloading = false
+		downloadMutex.Unlock()
+	}()
+
+	err := os.MkdirAll("cache", 0755)
+	if err != nil {
+		downloadMutex.Lock()
+		downloadError = err.Error()
+		downloadMutex.Unlock()
+		return
+	}
+
+	assetsToDownload := []struct {
+		name string
+		url  string
+	}{
+		{"Urbanist-Regular.ttf", "https://github.com/google/fonts/raw/main/ofl/urbanist/Urbanist-Regular.ttf"},
+		{"lucide.min.js", "https://cdn.jsdelivr.net/npm/lucide@0.453.0/dist/umd/lucide.min.js"},
+	}
+
+	for _, item := range assetsToDownload {
+		path := filepath.Join("cache", item.name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			resp, err := http.Get(item.url)
+			if err != nil {
+				downloadMutex.Lock()
+				downloadError = fmt.Sprintf("failed to download %s: %v", item.name, err)
+				downloadMutex.Unlock()
+				return
+			}
+			defer resp.Body.Close()
+
+			out, err := os.Create(path)
+			if err != nil {
+				downloadMutex.Lock()
+				downloadError = fmt.Sprintf("failed to create file %s: %v", item.name, err)
+				downloadMutex.Unlock()
+				return
+			}
+
+			_, err = io.Copy(out, resp.Body)
+			out.Close()
+			if err != nil {
+				downloadMutex.Lock()
+				downloadError = fmt.Sprintf("failed to save file %s: %v", item.name, err)
+				downloadMutex.Unlock()
+				return
+			}
+		}
+	}
+}
+
+func (a *App) LoadCachedAsset(name string) (string, error) {
+	path := filepath.Join("cache", name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+func (a *App) GetAssetDownloadStatus() map[string]interface{} {
+	downloadMutex.RLock()
+	defer downloadMutex.RUnlock()
+	return map[string]interface{}{
+		"isDownloading": isDownloading,
+		"error":         downloadError,
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
