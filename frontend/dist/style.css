@@ -233,16 +233,139 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   backdrop-filter: blur(12px);
-  padding: 16px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
 }
 
-.section-header h2 {
-  font-size: 15px;
+.collapse-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapse-section.expanded {
+  flex: 1;
+}
+
+.collapse-section:not(.expanded) {
+  flex: 0 0 auto;
+}
+
+.collapse-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 0;
+  user-select: none;
+  transition: opacity 0.2s ease;
+}
+
+.collapse-header:hover {
+  opacity: 0.85;
+}
+
+.collapse-header h2 {
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
   color: var(--text-muted);
   text-transform: uppercase;
-  margin-bottom: 14px;
+}
+
+.chevron-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+
+.collapse-section.expanded .collapse-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  margin-top: 10px;
+}
+
+.collapse-section:not(.expanded) .collapse-content {
+  display: none;
+}
+
+.audio-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.audio-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+}
+
+.audio-item:hover {
+  background: var(--panel-hover);
+  border-color: var(--border);
+}
+
+.audio-item.active {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.audio-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.audio-icon i {
+  width: 14px;
+  height: 14px;
+}
+
+.audio-item.active .audio-icon {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--accent);
+}
+
+.audio-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.audio-info strong {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-main);
 }
 
 .source-tabs {
@@ -478,6 +601,16 @@ html, body {
 
 #previewCanvas.live {
   opacity: 1;
+}
+
+#previewVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 2;
+  background-color: #040507;
 }
 
 .preview-grid {
@@ -782,6 +915,120 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.15);
 }
+
+.camera-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.camera-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+}
+
+.camera-item:hover {
+  background: var(--panel-hover);
+  border-color: var(--border);
+}
+
+.camera-item.active {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.camera-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.camera-icon i {
+  width: 14px;
+  height: 14px;
+}
+
+.camera-item.active .camera-icon {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--accent);
+}
+
+.camera-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.camera-info strong {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-main);
+}
+
+/* Floating resizable camera container inside preview */
+.preview-camera-container {
+  position: absolute;
+  width: 160px;
+  height: 120px;
+  min-width: 80px;
+  min-height: 60px;
+  bottom: 16px;
+  right: 16px;
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  background-color: #000;
+  overflow: visible; /* Let resize handles extend past edges */
+  z-index: 10;
+  cursor: move;
+  box-shadow: var(--shadow-md);
+  user-select: none;
+}
+
+.preview-camera-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background-color: var(--accent);
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  z-index: 20;
+}
+
+.resize-handle.top-left { top: -4px; left: -4px; cursor: nwse-resize; }
+.resize-handle.top-right { top: -4px; right: -4px; cursor: nesw-resize; }
+.resize-handle.bottom-left { bottom: -4px; left: -4px; cursor: nesw-resize; }
+.resize-handle.bottom-right { bottom: -4px; right: -4px; cursor: nwse-resize; }
 
 /* Responsive Grid Breakpoint */
 @media (max-width: 1080px) {

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -69,32 +70,129 @@ func toggleRecording(hwnd syscall.Handle) {
 
 // buildFFmpegCmdLine constructs the full ffmpeg.exe command line string for CreateProcessW
 func buildFFmpegCmdLine(outputPath string) string {
-	src := activeSources[selectedIndex]
-
 	args := []string{
 		"ffmpeg",
 		"-hide_banner",
-		"-loglevel", "error",
+		"-loglevel", "info",
 		"-y",
-		"-f", "gdigrab",
-		"-framerate", "60",
-		"-rtbufsize", "10M",
-		"-draw_mouse", "1",
 	}
 
-	if src.Type == "screen" {
-		args = append(args, "-i", "desktop")
+	videoInputIndex := 0
+	cameraInputIndex := -1
+	var audioInputIndices []int
+	currentInputIndex := 0
+
+	// 1. Video Input (Screen or Window)
+	if selectedVideoType == "screen" || selectedVideoType == "window" {
+		args = append(args,
+			"-f", "gdigrab",
+			"-framerate", "30",
+			"-rtbufsize", "100M",
+			"-draw_mouse", "1",
+		)
+		if selectedVideoType == "screen" {
+			args = append(args, "-i", "desktop")
+		} else if selectedIndex >= 0 && selectedIndex < len(activeSources) {
+			src := activeSources[selectedIndex]
+			args = append(args, "-i", "title="+src.Name)
+		} else {
+			args = append(args, "-i", "desktop")
+		}
+		videoInputIndex = currentInputIndex
+		currentInputIndex++
+	} else if selectedVideoType == "camera" && selectedVideoName != "" {
+		args = append(args,
+			"-f", "dshow",
+			"-rtbufsize", "100M",
+			"-i", dshowInputSpec("video", selectedVideoName),
+		)
+		videoInputIndex = currentInputIndex
+		currentInputIndex++
+	}
+
+	// 2. Camera Overlay Input
+	hasCameraOverlay := (selectedVideoType == "screen" || selectedVideoType == "window") && selectedVideoName != ""
+	if hasCameraOverlay {
+		args = append(args,
+			"-f", "dshow",
+			"-rtbufsize", "100M",
+			"-i", dshowInputSpec("video", selectedVideoName),
+		)
+		cameraInputIndex = currentInputIndex
+		currentInputIndex++
+	}
+
+	// 3. Audio Inputs
+	for _, audioName := range selectedAudioNames {
+		if audioName == "None" || audioName == "" {
+			continue
+		}
+		audioInputIndices = append(audioInputIndices, currentInputIndex)
+		currentInputIndex++
+		if audioName == "System Loopback" {
+			args = append(args,
+				"-f", "wasapi",
+				"-i", "Default Render Device",
+			)
+		} else {
+			args = append(args,
+				"-f", "dshow",
+				"-rtbufsize", "10M",
+				"-i", dshowInputSpec("audio", audioName),
+			)
+		}
+	}
+
+	// 4. Mappings and Filters
+	if hasCameraOverlay {
+		_, _, mainW, mainH := selectedSourceBounds()
+		overlayW := int(float64(mainW) * camW)
+		overlayH := int(float64(mainH) * camH)
+		overlayX := int(float64(mainW) * camX)
+		overlayY := int(float64(mainH) * camY)
+
+		if overlayW%2 != 0 {
+			overlayW--
+		}
+		if overlayH%2 != 0 {
+			overlayH--
+		}
+		if overlayW <= 0 {
+			overlayW = 320
+		}
+		if overlayH <= 0 {
+			overlayH = 240
+		}
+
+		filter := fmt.Sprintf("[%d:v]scale=%d:%d[cam];[%d:v][cam]overlay=%d:%d[outv]", cameraInputIndex, overlayW, overlayH, videoInputIndex, overlayX, overlayY)
+		args = append(args, "-filter_complex", filter, "-map", "[outv]")
 	} else {
-		args = append(args, "-i", "title="+src.Name)
+		args = append(args, "-map", fmt.Sprintf("%d:v", videoInputIndex))
 	}
 
+	for _, audioIdx := range audioInputIndices {
+		args = append(args, "-map", fmt.Sprintf("%d:a", audioIdx))
+	}
+
+	// 5. Output Encoding Parameters
 	args = append(args,
 		"-c:v", "libx264",
 		"-preset", "ultrafast",
 		"-tune", "zerolatency",
-		"-crf", "20",
-		"-threads", "1",
+		"-crf", "25",
+		"-threads", "4",
 		"-pix_fmt", "yuv420p",
+	)
+
+	if len(audioInputIndices) > 0 {
+		args = append(args,
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-ac", "2",
+		)
+	}
+
+	args = append(args,
 		"-movflags", "+faststart",
 		outputPath,
 	)
@@ -114,7 +212,42 @@ func quoteCmdArg(arg string) string {
 	if !strings.ContainsAny(arg, " \t\"") {
 		return arg
 	}
-	return `"` + strings.ReplaceAll(arg, `"`, `\"`) + `"`
+
+	var b strings.Builder
+	b.WriteByte('"')
+	backslashes := 0
+	for _, r := range arg {
+		if r == '\\' {
+			backslashes++
+			continue
+		}
+		if r == '"' {
+			b.WriteString(strings.Repeat("\\", backslashes*2+1))
+			b.WriteRune(r)
+			backslashes = 0
+			continue
+		}
+		if backslashes > 0 {
+			b.WriteString(strings.Repeat("\\", backslashes))
+			backslashes = 0
+		}
+		b.WriteRune(r)
+	}
+	if backslashes > 0 {
+		b.WriteString(strings.Repeat("\\", backslashes*2))
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+func dshowInputSpec(kind string, friendlyName string) string {
+	return kind + "=" + quoteDshowDeviceName(getDshowDeviceName(friendlyName))
+}
+
+func quoteDshowDeviceName(name string) string {
+	escaped := strings.ReplaceAll(name, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
 }
 
 func startFFmpegRecording(hwnd syscall.Handle) {
@@ -168,14 +301,24 @@ func startFFmpegRecording(hwnd syscall.Handle) {
 		0, 0,
 	)
 
+	// Create log file for stderr redirect
+	logFile, logErr := os.OpenFile(filepath.Join("recordings", "ffmpeg_log.txt"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	var logHandle syscall.Handle
+	if logErr == nil {
+		logHandle = syscall.Handle(logFile.Fd())
+		procSetHandleInformation.Call(uintptr(logHandle), 1, 1) // HANDLE_FLAG_INHERIT = 1
+	} else {
+		logHandle = syscall.Handle(0)
+	}
+
 	// ── Step 3: Fill STARTUPINFOEX ──────────────────────────────────────────
 	var siex STARTUPINFOEX
 	siex.StartupInfo.Cb = uint32(unsafe.Sizeof(siex))
 	siex.StartupInfo.Flags = syscall.STARTF_USESTDHANDLES | 0x00000100 // STARTF_USESHOWWINDOW
 	siex.StartupInfo.ShowWindow = 0                                    // SW_HIDE
 	siex.StartupInfo.StdInput = stdinRead
-	siex.StartupInfo.StdOutput = syscall.Handle(0)
-	siex.StartupInfo.StdErr = syscall.Handle(0)
+	siex.StartupInfo.StdOutput = logHandle
+	siex.StartupInfo.StdErr = logHandle
 	siex.AttributeList = attrListPtr
 
 	// ── Step 4: CreateProcessW ──────────────────────────────────────────────
@@ -196,6 +339,10 @@ func startFFmpegRecording(hwnd syscall.Handle) {
 		uintptr(unsafe.Pointer(&siex)),
 		uintptr(unsafe.Pointer(&pi)),
 	)
+
+	if logErr == nil {
+		logFile.Close()
+	}
 
 	// Clean up attribute list and child-side of pipe (ffmpeg owns it now)
 	procDeleteProcThreadAttributeList.Call(attrListPtr)
@@ -269,4 +416,55 @@ func stopRecordingTimer() {
 		close(timerStopChan)
 		recordingTimer = nil
 	}
+}
+
+var (
+	dshowDeviceMap   = make(map[string]string)
+	dshowDeviceMapMu sync.RWMutex
+)
+
+func parseDshowDevices() {
+	cmd := exec.Command("ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy")
+	// cmd.CombinedOutput captures both stdout and stderr (dshow lists devices on stderr)
+	out, _ := cmd.CombinedOutput()
+
+	lines := strings.Split(string(out), "\n")
+	var lastFriendlyName string
+	dshowDeviceMapMu.Lock()
+	defer dshowDeviceMapMu.Unlock()
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "DirectShow video devices") || strings.Contains(line, "DirectShow audio devices") {
+			lastFriendlyName = ""
+			continue
+		}
+
+		if strings.Contains(line, "Alternative name") {
+			parts := strings.Split(line, "Alternative name")
+			if len(parts) > 1 && lastFriendlyName != "" {
+				altName := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+				dshowDeviceMap[lastFriendlyName] = altName
+				lastFriendlyName = ""
+			}
+		} else {
+			// Find friendly name inside quotes, e.g. [dshow @ ...]  "ACER HD User Facing (0408:4035)"
+			idx := strings.Index(line, "\"")
+			if idx != -1 {
+				lastIdx := strings.LastIndex(line, "\"")
+				if lastIdx > idx {
+					lastFriendlyName = line[idx+1 : lastIdx]
+				}
+			}
+		}
+	}
+}
+
+func getDshowDeviceName(friendlyName string) string {
+	dshowDeviceMapMu.RLock()
+	defer dshowDeviceMapMu.RUnlock()
+	if alt, ok := dshowDeviceMap[friendlyName]; ok {
+		return alt
+	}
+	return friendlyName
 }

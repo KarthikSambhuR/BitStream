@@ -45,22 +45,54 @@
       <main class="workspace">
         <!-- Sidebar Sources -->
         <aside class="sources">
-          <div class="section-header">
-            <h2>Capture Sources</h2>
-          </div>
-          <nav class="source-tabs">
-            <button class="tab active" data-tab="0">
-              <i data-lucide="monitor"></i>
-              <span>Screens</span>
-            </button>
-            <button class="tab" data-tab="1">
-              <i data-lucide="layers"></i>
-              <span>Windows</span>
-            </button>
-          </nav>
+          <!-- Video Sources Section -->
+          <div class="collapse-section expanded" id="videoSection">
+            <div class="collapse-header" id="videoHeader">
+              <i data-lucide="chevron-down" class="chevron-icon"></i>
+              <h2>Video Sources</h2>
+            </div>
+            <div class="collapse-content">
+              <nav class="source-tabs">
+                <button class="tab active" data-tab="0">
+                  <i data-lucide="monitor"></i>
+                  <span>Screens</span>
+                </button>
+                <button class="tab" data-tab="1">
+                  <i data-lucide="layers"></i>
+                  <span>Windows</span>
+                </button>
+              </nav>
 
-          <div class="source-list" id="sourceList">
-            <!-- Populated dynamically -->
+              <div class="source-list" id="sourceList">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Camera Overlay Section -->
+          <div class="collapse-section expanded" id="camerasSection">
+            <div class="collapse-header" id="camerasHeader">
+              <i data-lucide="chevron-down" class="chevron-icon"></i>
+              <h2>Camera Overlay</h2>
+            </div>
+            <div class="collapse-content">
+              <div class="camera-list" id="cameraList">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Audio Sources Section -->
+          <div class="collapse-section expanded" id="audioSection">
+            <div class="collapse-header" id="audioHeader">
+              <i data-lucide="chevron-down" class="chevron-icon"></i>
+              <h2>Audio Sources</h2>
+            </div>
+            <div class="collapse-content">
+              <div class="audio-list" id="audioList">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
           </div>
 
           <div class="source-actions">
@@ -85,15 +117,25 @@
             <div class="status-pill" id="enginePill">Ready</div>
           </div>
 
-          <div class="preview">
+          <div class="preview" id="previewArea">
             <div class="preview-grid"></div>
             <canvas id="previewCanvas"></canvas>
+            
+            <!-- Floating Drag-and-Drop / Resizable Camera Container -->
+            <div class="preview-camera-container hidden" id="previewCameraContainer">
+              <div class="resize-handle top-left"></div>
+              <div class="resize-handle top-right"></div>
+              <div class="resize-handle bottom-left"></div>
+              <div class="resize-handle bottom-right"></div>
+              <video id="previewVideo" autoplay playsinline muted></video>
+            </div>
+
             <div class="preview-card" id="previewPlaceholder">
               <div class="preview-icon">
                 <i data-lucide="video"></i>
               </div>
               <div class="preview-name" id="previewName">No active source</div>
-              <div class="preview-meta" id="previewMeta">Choose a screen or window to start monitoring</div>
+              <div class="preview-meta" id="previewMeta">Choose a screen, window, or camera to start monitoring</div>
             </div>
           </div>
 

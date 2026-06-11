@@ -61,6 +61,16 @@ var (
 	timerString    string = "00:00"
 
 	ffmpegAvailable bool = false
+
+	selectedVideoType string = "screen"
+	selectedVideoName string = ""
+	selectedAudioName string = ""
+
+	selectedAudioNames []string
+	camX               float64
+	camY               float64
+	camW               float64
+	camH               float64
 )
 
 type CURSORINFO struct {

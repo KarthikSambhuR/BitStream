@@ -13,6 +13,14 @@ const state = {
   windowSaveTick: null,
 };
 
+const devicesState = {
+  cameras: [],
+  microphones: [],
+  selectedCameraId: null,
+  selectedMics: [], // Allow multiple selected audio source names
+  cameraStream: null,
+};
+
 const els = {
   sourceList: document.querySelector("#sourceList"),
   tabs: [...document.querySelectorAll(".tab")],
@@ -38,7 +46,9 @@ const els = {
 };
 
 function sourceLabel(type) {
-  return type === "screen" ? "Display Feed" : "Window Capture";
+  if (type === "screen") return "Display Feed";
+  if (type === "camera") return "Camera Feed";
+  return "Window Capture";
 }
 
 function render(next) {
@@ -50,6 +60,7 @@ function render(next) {
     tab.classList.toggle("active", Number(tab.dataset.tab) === next.currentTab);
   });
 
+  // Render Screens/Windows sourceList
   els.sourceList.replaceChildren(
     ...next.sources.map((source) => {
       const button = document.createElement("button");
@@ -71,6 +82,7 @@ function render(next) {
     }),
   );
 
+  // Render active selection details
   const selected = next.sources.find((item) => item.index === next.selectedIndex);
   els.previewTitle.textContent = selected ? selected.name : "Select a source";
   els.previewName.textContent = selected ? selected.name : "No source selected";
@@ -91,7 +103,7 @@ function render(next) {
   els.recordState.textContent = next.isRecording ? "Capturing" : "Idle";
   els.recordDot.classList.toggle("live", next.isRecording);
 
-  // Update Record Button text & icon
+  // Update Record Button
   const recordIcon = document.getElementById("recordBtnIcon");
   const recordText = document.getElementById("recordBtnText");
   if (recordIcon && recordText) {
@@ -114,11 +126,160 @@ function render(next) {
     : next.backendDetail;
 
   manageTimer(next.isRecording);
-  managePreview(Boolean(selected), next.selectedIndex);
+  managePreview(state.selectedIndex >= 0, state.selectedIndex);
+  renderCameraList();
+  renderAudioList();
 
-  // Parse new icon elements using Lucide
+  refreshIcons();
+}
+
+function refreshIcons() {
   if (window.lucide) {
     window.lucide.createIcons();
+  }
+}
+
+function renderCameraList() {
+  const cameraList = document.getElementById("cameraList");
+  if (!cameraList) return;
+
+  const items = [
+    { label: "No Overlay / Disabled", deviceId: "None", labelText: "Disabled" }
+  ];
+
+  devicesState.cameras.forEach((cam) => {
+    items.push({
+      label: cam.label || "Camera Device",
+      deviceId: cam.deviceId,
+      labelText: "Camera Stream"
+    });
+  });
+
+  cameraList.replaceChildren(
+    ...items.map(item => {
+      const button = document.createElement("button");
+      const isActive = devicesState.selectedCameraId === item.deviceId;
+      button.className = `camera-item ${isActive ? "active" : ""}`;
+      button.type = "button";
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", String(isActive));
+      button.innerHTML = `
+        <div class="camera-icon">
+          <i data-lucide="${item.deviceId === "None" ? "video-off" : "camera"}"></i>
+        </div>
+        <div class="camera-info">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${item.labelText}</span>
+        </div>
+      `;
+      button.addEventListener("click", async () => {
+        devicesState.selectedCameraId = item.deviceId;
+        if (item.deviceId === "None") {
+          stopCameraPreview();
+        } else {
+          const matchedCam = devicesState.cameras.find(c => c.deviceId === item.deviceId);
+          if (matchedCam) {
+            await startCameraPreview(matchedCam);
+          }
+        }
+        renderCameraList();
+      });
+      return button;
+    })
+  );
+  refreshIcons();
+}
+
+function renderAudioList() {
+  const audioList = document.getElementById("audioList");
+  if (!audioList) return;
+
+  const items = [
+    { label: "Mute / No Audio", name: "None", icon: "volume-x" },
+    { label: "System Playback Loopback", name: "System Loopback", icon: "monitor-play" }
+  ];
+
+  devicesState.microphones.forEach((mic, i) => {
+    items.push({
+      label: mic.label || `Microphone ${i + 1}`,
+      name: mic.label || `Microphone ${i + 1}`,
+      icon: "mic"
+    });
+  });
+
+  audioList.replaceChildren(
+    ...items.map(item => {
+      const button = document.createElement("button");
+      const isActive = devicesState.selectedMics.includes(item.name) || (devicesState.selectedMics.length === 0 && item.name === "None");
+      button.className = `audio-item ${isActive ? "active" : ""}`;
+      button.type = "button";
+      button.setAttribute("role", "checkbox");
+      button.setAttribute("aria-checked", String(isActive));
+      button.innerHTML = `
+        <div class="audio-icon">
+          <i data-lucide="${isActive ? 'check-square' : 'square'}"></i>
+        </div>
+        <div class="audio-info">
+          <strong>${escapeHtml(item.label)}</strong>
+        </div>
+      `;
+      button.addEventListener("click", () => {
+        if (item.name === "None") {
+          devicesState.selectedMics = ["None"];
+        } else {
+          // Remove "None" if other input is selected
+          devicesState.selectedMics = devicesState.selectedMics.filter(m => m !== "None");
+          
+          if (devicesState.selectedMics.includes(item.name)) {
+            devicesState.selectedMics = devicesState.selectedMics.filter(m => m !== item.name);
+          } else {
+            devicesState.selectedMics.push(item.name);
+          }
+          if (devicesState.selectedMics.length === 0) {
+            devicesState.selectedMics = ["None"];
+          }
+        }
+        renderAudioList();
+      });
+      return button;
+    })
+  );
+  refreshIcons();
+}
+
+async function startCameraPreview(camera) {
+  stopCameraPreview();
+
+  const container = document.getElementById("previewCameraContainer");
+  const videoEl = document.getElementById("previewVideo");
+  if (!container || !videoEl) return;
+
+  container.classList.remove("hidden");
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: camera.deviceId } }
+    });
+    devicesState.cameraStream = stream;
+    videoEl.srcObject = stream;
+    videoEl.play();
+  } catch (err) {
+    console.error("Failed to start camera overlay preview:", err);
+  }
+}
+
+function stopCameraPreview() {
+  const container = document.getElementById("previewCameraContainer");
+  const videoEl = document.getElementById("previewVideo");
+  if (videoEl) {
+    videoEl.srcObject = null;
+  }
+  if (container) {
+    container.classList.add("hidden");
+  }
+  if (devicesState.cameraStream) {
+    devicesState.cameraStream.getTracks().forEach((track) => track.stop());
+    devicesState.cameraStream = null;
   }
 }
 
@@ -236,7 +397,7 @@ function drawPreviewFrame(frame, rect, dpr) {
   state.previewCtx = ctx;
   const x = Math.max(0, Math.floor((canvas.width - frame.width) / 2));
   const y = Math.max(0, Math.floor((canvas.height - frame.height) / 2));
-  ctx.fillStyle = "#090d12"; // Match minimal background
+  ctx.fillStyle = "#090d12";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.putImageData(new ImageData(bytes, frame.width, frame.height), x, y);
   canvas.classList.add("live");
@@ -257,23 +418,65 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function getNormalizedOverlayCoords() {
+  const container = document.getElementById("previewCameraContainer");
+  const previewArea = document.getElementById("previewArea");
+  if (!container || !previewArea || container.classList.contains("hidden")) {
+    return { x: 0, y: 0, w: 0, h: 0 };
+  }
+  const rect = container.getBoundingClientRect();
+  const areaRect = previewArea.getBoundingClientRect();
+
+  return {
+    x: (rect.left - areaRect.left) / areaRect.width,
+    y: (rect.top - areaRect.top) / areaRect.height,
+    w: rect.width / areaRect.width,
+    h: rect.height / areaRect.height,
+  };
+}
+
 async function boot() {
-  // Wait for the backend API connection
   while (!api()) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
-  // Start checking and downloading offline assets first
   await loadOfflineAssets();
+  await initMediaDevices();
+  initOverlayDraggable();
 
-  // Attach event listeners
+  // Collapsible section event listeners
+  const collapsibleConfigs = [
+    { headerId: "videoHeader", sectionId: "videoSection" },
+    { headerId: "camerasHeader", sectionId: "camerasSection" },
+    { headerId: "audioHeader", sectionId: "audioSection" }
+  ];
+
+  collapsibleConfigs.forEach(({ headerId, sectionId }) => {
+    const header = document.getElementById(headerId);
+    const section = document.getElementById(sectionId);
+    if (header && section) {
+      header.addEventListener("click", () => {
+        section.classList.toggle("expanded");
+        const icon = header.querySelector(".chevron-icon");
+        if (icon) {
+          const isExp = section.classList.contains("expanded");
+          icon.setAttribute("data-lucide", isExp ? "chevron-down" : "chevron-right");
+          refreshIcons();
+        }
+      });
+    }
+  });
+
+  // Attach tab events (Screens and Windows)
   els.tabs.forEach((tab) => {
     tab.addEventListener("click", async () => {
-      render(await api().RefreshSources(Number(tab.dataset.tab)));
+      const tabIndex = Number(tab.dataset.tab);
+      render(await api().RefreshSources(tabIndex));
     });
   });
 
   els.refresh.addEventListener("click", async () => {
+    await initMediaDevices();
     render(await api().RefreshSources(state.currentTab));
   });
 
@@ -284,50 +487,198 @@ async function boot() {
       render(await api().StopRecording());
       return;
     }
-    render(await api().StartRecording(state.selectedIndex));
+
+    const videoType = state.currentTab === 0 ? "screen" : "window";
+    
+    // Check if camera overlay is enabled
+    let videoName = "";
+    if (devicesState.selectedCameraId && devicesState.selectedCameraId !== "None") {
+      const selectedCam = devicesState.cameras.find(c => c.deviceId === devicesState.selectedCameraId);
+      if (selectedCam) {
+        videoName = selectedCam.label;
+      }
+    }
+
+    // Get floating camera normalized coordinates
+    const coords = getNormalizedOverlayCoords();
+
+    render(await api().StartRecording(
+      state.selectedIndex,
+      videoType,
+      videoName,
+      devicesState.selectedMics,
+      coords.x,
+      coords.y,
+      coords.w,
+      coords.h
+    ));
   });
 
   els.minimise.addEventListener("click", () => api().Minimise());
   els.maximise.addEventListener("click", () => api().ToggleMaximise());
   els.close.addEventListener("click", () => api().Close());
 
-  // Render initial state
   render(await api().GetState());
   window.addEventListener("resize", moveNativePreview);
   state.windowSaveTick = window.setInterval(() => api().SaveWindowState(), 5000);
   window.addEventListener("beforeunload", () => api().SaveWindowState());
 }
 
+function initOverlayDraggable() {
+  const container = document.getElementById("previewCameraContainer");
+  const previewArea = document.getElementById("previewArea");
+  if (!container || !previewArea) return;
+
+  let isDragging = false;
+  let isResizing = false;
+  let currentHandle = null;
+  let startX, startY, startLeft, startTop, startWidth, startHeight;
+
+  container.addEventListener("mousedown", (e) => {
+    if (e.target.classList.contains("resize-handle")) {
+      isResizing = true;
+      currentHandle = e.target;
+    } else {
+      isDragging = true;
+    }
+
+    startX = e.clientX;
+    startY = e.clientY;
+    
+    const rect = container.getBoundingClientRect();
+    const areaRect = previewArea.getBoundingClientRect();
+
+    startLeft = rect.left - areaRect.left;
+    startTop = rect.top - areaRect.top;
+    startWidth = rect.width;
+    startHeight = rect.height;
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  });
+
+  function onMouseMove(e) {
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const areaRect = previewArea.getBoundingClientRect();
+
+    if (isDragging) {
+      let newLeft = startLeft + dx;
+      let newTop = startTop + dy;
+
+      newLeft = Math.max(0, Math.min(newLeft, areaRect.width - startWidth));
+      newTop = Math.max(0, Math.min(newTop, areaRect.height - startHeight));
+
+      container.style.left = `${newLeft}px`;
+      container.style.top = `${newTop}px`;
+      container.style.bottom = "auto";
+      container.style.right = "auto";
+    } else if (isResizing) {
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+      let newLeft = startLeft;
+      let newTop = startTop;
+
+      if (currentHandle.classList.contains("bottom-right")) {
+        newWidth = Math.max(80, startWidth + dx);
+        newHeight = Math.max(60, startHeight + dy);
+      } else if (currentHandle.classList.contains("bottom-left")) {
+        newWidth = Math.max(80, startWidth - dx);
+        newHeight = Math.max(60, startHeight + dy);
+        newLeft = startLeft + (startWidth - newWidth);
+      } else if (currentHandle.classList.contains("top-right")) {
+        newWidth = Math.max(80, startWidth + dx);
+        newHeight = Math.max(60, startHeight - dy);
+        newTop = startTop + (startHeight - newHeight);
+      } else if (currentHandle.classList.contains("top-left")) {
+        newWidth = Math.max(80, startWidth - dx);
+        newHeight = Math.max(60, startHeight - dy);
+        newLeft = startLeft + (startWidth - newWidth);
+        newTop = startTop + (startHeight - newHeight);
+      }
+
+      if (newLeft < 0) {
+        newWidth += newLeft;
+        newLeft = 0;
+      }
+      if (newTop < 0) {
+        newHeight += newTop;
+        newTop = 0;
+      }
+      if (newLeft + newWidth > areaRect.width) {
+        newWidth = areaRect.width - newLeft;
+      }
+      if (newTop + newHeight > areaRect.height) {
+        newHeight = areaRect.height - newTop;
+      }
+
+      container.style.width = `${newWidth}px`;
+      container.style.height = `${newHeight}px`;
+      container.style.left = `${newLeft}px`;
+      container.style.top = `${newTop}px`;
+      container.style.bottom = "auto";
+      container.style.right = "auto";
+    }
+  }
+
+  function onMouseUp() {
+    isDragging = false;
+    isResizing = false;
+    currentHandle = null;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  }
+}
+
+async function initMediaDevices() {
+  try {
+    await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (err) {
+    console.warn("Permissions not granted or failed:", err);
+  }
+
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    devicesState.cameras = list.filter((d) => d.kind === "videoinput");
+    devicesState.microphones = list.filter((d) => d.kind === "audioinput");
+    
+    if (devicesState.cameras.length > 0 && !devicesState.selectedCameraId) {
+      devicesState.selectedCameraId = "None"; // default overlay off
+    }
+    if (devicesState.selectedMics.length === 0) {
+      devicesState.selectedMics = ["None"];
+    }
+  } catch (err) {
+    console.error("Failed to list media devices:", err);
+  }
+}
+
 async function loadOfflineAssets() {
   const loaderStatus = document.getElementById("loader-status");
-  
-  // 1. Wait for caching download process to finish
   let status = await api().GetAssetDownloadStatus();
   while (status.isDownloading) {
     loaderStatus.textContent = "Downloading system font & icon library...";
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 800));
     status = await api().GetAssetDownloadStatus();
   }
 
   if (status.error) {
-    console.error("Asset download error recorded:", status.error);
+    console.error("Asset download error:", status.error);
   }
 
-  // 2. Load Urbanist font from local cache folder
   try {
     loaderStatus.textContent = "Caching Urbanist font...";
     const fontBase64 = await api().LoadCachedAsset("Urbanist-Regular.ttf");
     if (fontBase64) {
-      const fontFace = new FontFace('Urbanist', `url(data:font/ttf;base64,${fontBase64})`);
+      const fontFace = new FontFace("Urbanist", `url(data:font/ttf;base64,${fontBase64})`);
       await fontFace.load();
       document.fonts.add(fontFace);
       document.body.style.fontFamily = "'Urbanist', sans-serif";
     }
   } catch (err) {
-    console.error("Failed to load Urbanist font from cache:", err);
+    console.error("Failed to load Urbanist font:", err);
   }
 
-  // 3. Load Lucide JS from local cache folder
   try {
     loaderStatus.textContent = "Caching icon library...";
     const lucideBase64 = await api().LoadCachedAsset("lucide.min.js");
@@ -338,10 +689,9 @@ async function loadOfflineAssets() {
       document.head.appendChild(script);
     }
   } catch (err) {
-    console.error("Failed to load Lucide icon script from cache:", err);
+    console.error("Failed to load Lucide script:", err);
   }
 
-  // Remove loader and display main screen
   document.getElementById("app-loader").classList.add("hidden");
   document.getElementById("app-root").classList.remove("hidden");
 }

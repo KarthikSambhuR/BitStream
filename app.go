@@ -65,6 +65,9 @@ func (a *App) startup(ctx context.Context) {
 	ffmpegAvailable = lookupErr == nil
 	refreshSourceListLight(0)
 	go a.ensureAssets()
+	if ffmpegAvailable {
+		go parseDshowDevices()
+	}
 }
 
 func (a *App) ensureAssets() {
@@ -210,12 +213,23 @@ func (a *App) GetPreviewFrameRaw(index int, maxW int, maxH int) PreviewFrame {
 	return capturePreviewRawFrame(index, maxW, maxH)
 }
 
-func (a *App) StartRecording(index int) AppState {
+func (a *App) StartRecording(index int, videoType string, videoName string, audioNames []string, cX float64, cY float64, cW float64, cH float64) AppState {
+	selectedVideoType = videoType
+	selectedVideoName = videoName
+	selectedAudioNames = audioNames
+	camX = cX
+	camY = cY
+	camW = cW
+	camH = cH
+
 	if index >= 0 && index < len(activeSources) {
 		selectedIndex = index
 		selectedHWND = activeSources[index].HWND
+	} else {
+		selectedIndex = -1
+		selectedHWND = 0
 	}
-	if selectedHWND != 0 && ffmpegAvailable && !isRecording {
+	if ffmpegAvailable && !isRecording {
 		startFFmpegRecording(0)
 	}
 	return buildAppState()
